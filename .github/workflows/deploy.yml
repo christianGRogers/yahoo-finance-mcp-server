@@ -33,6 +33,9 @@ jobs:
           APP_PORT: "8081"
           REPO_URL: "https://github.com/${{ github.repository }}.git"
           GIT_REF: ${{ github.event.inputs.git_ref || 'main' }}
+          # Raspberry Pi OS Bullseye ships Python 3.9; set the secret/var to
+          # python3.11 there. Falls back to python3 (fine on Bookworm).
+          PYTHON_BIN: ${{ vars.PYTHON_BIN || 'python3' }}
         run: |
           chmod +x deploy/deploy.sh
           ./deploy/deploy.sh

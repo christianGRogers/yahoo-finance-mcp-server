@@ -16,6 +16,9 @@
 #   APP_DIR              - remote checkout directory (default: ~/yahoo-finance-mcp-server)
 #   REPO_URL             - git URL to clone/pull (default: this repo)
 #   GIT_REF              - branch/tag/sha to deploy (default: main)
+#   PYTHON_BIN           - python interpreter on the remote (default: python3).
+#                          On Raspberry Pi OS Bullseye set this to e.g.
+#                          python3.11 after installing a >=3.10 interpreter.
 #
 # Usage:  ./deploy/deploy.sh
 
@@ -30,6 +33,7 @@ APP_PORT="${APP_PORT:-8081}"
 APP_DIR="${APP_DIR:-yahoo-finance-mcp-server}"
 REPO_URL="${REPO_URL:-https://github.com/christianGRogers/yahoo-finance-mcp-server.git}"
 GIT_REF="${GIT_REF:-main}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 command -v sshpass >/dev/null 2>&1 || {
   echo "ERROR: sshpass is not installed. Install it (apt-get install sshpass)." >&2
@@ -43,10 +47,23 @@ echo ">> Deploying ${REPO_URL}@${GIT_REF} to ${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOS
 # The remote-side script. APP_* values are interpolated locally and passed in.
 sshpass -p "${DEPLOY_SSH_PASSWORD}" ssh "${SSH_OPTS[@]}" \
   "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
-  "APP_PORT='${APP_PORT}' APP_DIR='${APP_DIR}' REPO_URL='${REPO_URL}' GIT_REF='${GIT_REF}' bash -s" <<'REMOTE'
+  "APP_PORT='${APP_PORT}' APP_DIR='${APP_DIR}' REPO_URL='${REPO_URL}' GIT_REF='${GIT_REF}' PYTHON_BIN='${PYTHON_BIN}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 echo "   [remote] host: $(hostname)"
+
+# --- verify interpreter is >= 3.10 -----------------------------------------
+if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+  echo "   [remote] ERROR: '${PYTHON_BIN}' not found on PATH." >&2
+  echo "   [remote] Install Python >=3.10 and pass PYTHON_BIN (e.g. python3.11)." >&2
+  exit 1
+fi
+if ! "${PYTHON_BIN}" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)'; then
+  echo "   [remote] ERROR: ${PYTHON_BIN} is $(${PYTHON_BIN} -V 2>&1); need >=3.10." >&2
+  echo "   [remote] On Raspberry Pi OS Bullseye, install python3.11 and set PYTHON_BIN=python3.11." >&2
+  exit 1
+fi
+echo "   [remote] using $(${PYTHON_BIN} -V 2>&1)"
 
 # --- fetch / update source -------------------------------------------------
 if [ -d "${APP_DIR}/.git" ]; then
@@ -62,7 +79,7 @@ cd "${APP_DIR}"
 
 # --- install ----------------------------------------------------------------
 echo "   [remote] installing dependencies"
-python3 -m venv .venv
+"${PYTHON_BIN}" -m venv .venv
 ./.venv/bin/python -m pip install --quiet --upgrade pip
 ./.venv/bin/python -m pip install --quiet -e .
 

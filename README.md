@@ -116,12 +116,19 @@ it on port 8081 with a health check. It authenticates over SSH using these
 | `DEPLOY_SSH_USER` | SSH username |
 | `DEPLOY_SSH_PASSWORD` | SSH password |
 
+Set `PYTHON_BIN` if the remote's default `python3` is older than 3.10 — e.g. on
+**Raspberry Pi OS Bullseye** (ships Python 3.9.2) install a newer interpreter
+and set `PYTHON_BIN=python3.11`. In CI, define a repository variable
+`PYTHON_BIN` (Settings → Secrets and variables → Actions → Variables). The
+deploy aborts early with a clear message if the interpreter is too old.
+
 The `.github/workflows/deploy.yml` workflow runs the script on every push to
 `main` (and on manual `workflow_dispatch`). To run it by hand:
 
 ```bash
 DEPLOY_SSH_HOST=1.2.3.4 DEPLOY_SSH_PORT=22 \
-DEPLOY_SSH_USER=deploy DEPLOY_SSH_PASSWORD=secret \
+DEPLOY_SSH_USER=pi DEPLOY_SSH_PASSWORD=secret \
+PYTHON_BIN=python3.11 \
 ./deploy/deploy.sh
 ```
 
