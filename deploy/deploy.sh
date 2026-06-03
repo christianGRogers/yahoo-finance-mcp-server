@@ -148,6 +148,22 @@ else
 fi
 cd "${APP_DIR}"
 
+# --- system runtime libraries ----------------------------------------------
+# numpy/pandas wheels need OpenBLAS (libopenblas.so.0) + libgfortran at
+# runtime; these are not Python packages. On a fresh Raspberry Pi they're
+# often missing, which surfaces as "libopenblas.so.0: cannot open shared
+# object file" when numpy imports. Install them if absent.
+if ! ldconfig -p 2>/dev/null | grep -q 'libopenblas\.so\.0'; then
+  echo "   [remote] installing OpenBLAS runtime (required by numpy)"
+  run_sudo apt-get update -y
+  # Package name varies across Raspberry Pi OS / Debian releases.
+  run_sudo apt-get install -y libopenblas0 \
+    || run_sudo apt-get install -y libopenblas0-pthread \
+    || run_sudo apt-get install -y libopenblas-base \
+    || run_sudo apt-get install -y libopenblas-dev
+  run_sudo apt-get install -y libgfortran5 || true
+fi
+
 # --- install ----------------------------------------------------------------
 # Recreate the venv if it is missing or was built with an old interpreter
 # (e.g. a 3.9 venv left by an earlier deploy). `venv` reuses an existing
