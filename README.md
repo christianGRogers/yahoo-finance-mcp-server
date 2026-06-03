@@ -85,6 +85,50 @@ Or, with Claude Code:
 claude mcp add yahoo-finance -- /absolute/path/to/.venv/bin/python -m yahoo_finance_mcp
 ```
 
+## Deployment (HTTP, port 8081)
+
+For remote/agent access the server can run over **streamable HTTP** instead of
+stdio. Transport and binding are controlled by env vars:
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `MCP_TRANSPORT` | `stdio` | `streamable-http` (or `sse`) to serve over HTTP |
+| `MCP_HOST` | `0.0.0.0` | bind address |
+| `MCP_PORT` | `8081` | listen port |
+
+Run it directly:
+
+```bash
+MCP_TRANSPORT=streamable-http MCP_PORT=8081 python -m yahoo_finance_mcp
+# endpoint: http://<host>:8081/mcp
+```
+
+### Automated deploy via SSH
+
+`deploy/deploy.sh` ships the code to a remote host, installs it, and (re)starts
+it on port 8081 with a health check. It authenticates over SSH using these
+**GitHub repository secrets**:
+
+| Secret | Meaning |
+| --- | --- |
+| `DEPLOY_SSH_HOST` | remote endpoint (host/IP) |
+| `DEPLOY_SSH_PORT` | SSH port |
+| `DEPLOY_SSH_USER` | SSH username |
+| `DEPLOY_SSH_PASSWORD` | SSH password |
+
+The `.github/workflows/deploy.yml` workflow runs the script on every push to
+`main` (and on manual `workflow_dispatch`). To run it by hand:
+
+```bash
+DEPLOY_SSH_HOST=1.2.3.4 DEPLOY_SSH_PORT=22 \
+DEPLOY_SSH_USER=deploy DEPLOY_SSH_PASSWORD=secret \
+./deploy/deploy.sh
+```
+
+The script clones/updates the repo, builds a venv, stops any prior instance on
+the port, starts the server detached (`setsid`, survives disconnect, logs to
+`server.log`), then verifies `POST /mcp` returns `200`.
+
 ## Notes & limitations
 
 - **Unofficial data source.** Yahoo may rate-limit or change responses. Tools

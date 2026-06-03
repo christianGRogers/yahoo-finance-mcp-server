@@ -12,6 +12,7 @@ Run with:  yahoo-finance-mcp           (stdio transport, for MCP clients)
 from __future__ import annotations
 
 import functools
+import os
 from typing import Any, Callable, Literal, Optional
 
 import yfinance as yf
@@ -19,8 +20,15 @@ from mcp.server.fastmcp import FastMCP
 
 from .serialization import to_jsonable
 
+# Network binding for HTTP transports. Defaults suit a containerized/remote
+# deploy; overridden per-environment via MCP_HOST / MCP_PORT.
+HOST = os.getenv("MCP_HOST", "0.0.0.0")
+PORT = int(os.getenv("MCP_PORT", "8081"))
+
 mcp = FastMCP(
     "yahoo-finance",
+    host=HOST,
+    port=PORT,
     instructions=(
         "Tools for retrieving data from Yahoo Finance via yfinance. "
         "Tickers use Yahoo symbols (e.g. AAPL, MSFT, BTC-USD, ^GSPC, EURUSD=X). "
@@ -605,8 +613,18 @@ def screen_custom(
 
 
 def main() -> None:
-    """Console-script / module entry point. Serves over stdio."""
-    mcp.run()
+    """Console-script / module entry point.
+
+    Transport is selected with MCP_TRANSPORT:
+      * "stdio" (default) — for local MCP clients (Claude Desktop/Code).
+      * "streamable-http" — serve over HTTP on MCP_HOST:MCP_PORT (deploy mode).
+      * "sse" — legacy SSE HTTP transport.
+    """
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    if transport == "stdio":
+        mcp.run()
+    else:
+        mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
