@@ -182,6 +182,28 @@ echo "   [remote] installing dependencies"
 ./.venv/bin/python -m pip install --quiet --upgrade pip
 ./.venv/bin/python -m pip install --quiet -e .
 
+# Native deps (numpy/pandas) install prebuilt wheels that may target a newer
+# glibc than this OS provides. On 32-bit Raspberry Pi OS Bullseye (armhf,
+# glibc 2.31) the cp311 wheels need glibc >=2.34 and fail to import with
+# "GLIBC_2.34 not found". Detect that and rebuild them from source against the
+# local toolchain. Skipped on platforms where the wheels load fine (Bookworm,
+# 64-bit, etc.). pip caches the compiled wheels, so this is a one-time cost.
+if ! ./.venv/bin/python -c 'import numpy, pandas' 2>/dev/null; then
+  echo "   [remote] prebuilt numpy/pandas not compatible with this OS; compiling from source"
+  echo "   [remote] (one-time bootstrap; can take 30+ min on a Pi, then cached)"
+  run_sudo apt-get install -y gfortran g++ libopenblas-dev liblapack-dev pkg-config
+  ./.venv/bin/python -m pip install --no-binary numpy,pandas --force-reinstall numpy pandas
+  ./.venv/bin/python -m pip install --quiet -e .
+fi
+
+# Fail loudly if the stack still cannot import, with the underlying error.
+if ! ./.venv/bin/python -c 'import numpy, pandas, yfinance' 2>/dev/null; then
+  echo "   [remote] ERROR: dependencies still fail to import:" >&2
+  ./.venv/bin/python -c 'import numpy, pandas, yfinance' >&2 || true
+  exit 1
+fi
+echo "   [remote] dependencies import OK"
+
 # --- stop any previous instance on this port --------------------------------
 echo "   [remote] stopping previous instance (if any)"
 if command -v fuser >/dev/null 2>&1; then
