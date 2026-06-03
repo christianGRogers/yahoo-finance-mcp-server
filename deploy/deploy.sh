@@ -16,9 +16,19 @@
 #   APP_DIR              - remote checkout directory (default: ~/yahoo-finance-mcp-server)
 #   REPO_URL             - git URL to clone/pull (default: this repo)
 #   GIT_REF              - branch/tag/sha to deploy (default: main)
-#   PYTHON_BIN           - python interpreter on the remote (default: python3).
-#                          On Raspberry Pi OS Bullseye set this to e.g.
-#                          python3.11 after installing a >=3.10 interpreter.
+#   PYTHON_BIN           - preferred python interpreter on the remote.
+#                          If unset/too old, the script auto-discovers any
+#                          installed Python >=3.10, and if none exists it
+#                          builds one from source (one-time, see below).
+#   PYTHON_BUILD_VERSION - CPython version to build when none is found
+#                          (default: 3.11.9). Used on e.g. Raspberry Pi OS
+#                          Bullseye, which ships only Python 3.9.
+#
+# Auto-provisioning: when no Python >=3.10 is present the script installs build
+# dependencies (apt) and compiles CPython to /usr/local via `make altinstall`.
+# This needs root: it works if the deploy user has passwordless sudo, otherwise
+# it uses DEPLOY_SSH_PASSWORD for `sudo -S`. The build runs ONCE; later deploys
+# discover the installed interpreter and skip it.
 #
 # Usage:  ./deploy/deploy.sh
 
@@ -34,36 +44,97 @@ APP_DIR="${APP_DIR:-yahoo-finance-mcp-server}"
 REPO_URL="${REPO_URL:-https://github.com/christianGRogers/yahoo-finance-mcp-server.git}"
 GIT_REF="${GIT_REF:-main}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BUILD_VERSION="${PYTHON_BUILD_VERSION:-3.11.9}"
 
 command -v sshpass >/dev/null 2>&1 || {
   echo "ERROR: sshpass is not installed. Install it (apt-get install sshpass)." >&2
   exit 1
 }
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "${DEPLOY_SSH_PORT}")
+# Keepalives matter: a from-source Python build can hold the connection open
+# for many minutes with no traffic.
+SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=120
+  -p "${DEPLOY_SSH_PORT}"
+)
 
 echo ">> Deploying ${REPO_URL}@${GIT_REF} to ${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:${DEPLOY_SSH_PORT} (port ${APP_PORT})"
 
 # The remote-side script. APP_* values are interpolated locally and passed in.
 sshpass -p "${DEPLOY_SSH_PASSWORD}" ssh "${SSH_OPTS[@]}" \
   "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
-  "APP_PORT='${APP_PORT}' APP_DIR='${APP_DIR}' REPO_URL='${REPO_URL}' GIT_REF='${GIT_REF}' PYTHON_BIN='${PYTHON_BIN}' bash -s" <<'REMOTE'
+  "APP_PORT='${APP_PORT}' APP_DIR='${APP_DIR}' REPO_URL='${REPO_URL}' GIT_REF='${GIT_REF}' PYTHON_BIN='${PYTHON_BIN}' PYTHON_BUILD_VERSION='${PYTHON_BUILD_VERSION}' SUDO_PASS='${DEPLOY_SSH_PASSWORD}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 echo "   [remote] host: $(hostname)"
 
-# --- verify interpreter is >= 3.10 -----------------------------------------
-if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-  echo "   [remote] ERROR: '${PYTHON_BIN}' not found on PATH." >&2
-  echo "   [remote] Install Python >=3.10 and pass PYTHON_BIN (e.g. python3.11)." >&2
-  exit 1
+# --- ensure a Python >= 3.10 interpreter (auto-install if needed) ----------
+py_ok() {  # $1 = interpreter name/path; ok if present and >=3.10
+  command -v "$1" >/dev/null 2>&1 && \
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)' 2>/dev/null
+}
+
+find_python() {  # print path to a usable interpreter, or return 1
+  local c
+  for c in "${PYTHON_BIN}" python3.13 python3.12 python3.11 python3.10 \
+           /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+           /usr/local/bin/python3.11 /usr/local/bin/python3.10; do
+    if py_ok "$c"; then command -v "$c"; return 0; fi
+  done
+  return 1
+}
+
+run_sudo() {  # run as root: direct if already root, else sudo (password if needed)
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif sudo -n true 2>/dev/null; then
+    sudo "$@"
+  elif [ -n "${SUDO_PASS:-}" ]; then
+    printf '%s\n' "${SUDO_PASS}" | sudo -S -p '' "$@"
+  else
+    echo "   [remote] ERROR: need root to install Python but no sudo access." >&2
+    return 1
+  fi
+}
+
+build_python() {
+  local mm src
+  mm="$(printf '%s' "${PYTHON_BUILD_VERSION}" | cut -d. -f1-2)"
+  echo "   [remote] no Python >=3.10 found; building CPython ${PYTHON_BUILD_VERSION} from source"
+  echo "   [remote] (one-time bootstrap; may take 15-40 min on a Raspberry Pi)"
+  run_sudo apt-get update -y
+  run_sudo apt-get install -y --no-install-recommends \
+    build-essential wget ca-certificates tk-dev libssl-dev libffi-dev \
+    zlib1g-dev libbz2-dev libsqlite3-dev libreadline-dev libncurses5-dev \
+    libgdbm-dev liblzma-dev uuid-dev
+  src="/tmp/Python-${PYTHON_BUILD_VERSION}"
+  rm -rf "${src}" "${src}.tgz"
+  wget -q -O "${src}.tgz" \
+    "https://www.python.org/ftp/python/${PYTHON_BUILD_VERSION}/Python-${PYTHON_BUILD_VERSION}.tgz"
+  tar -xf "${src}.tgz" -C /tmp
+  (
+    cd "${src}"
+    ./configure --prefix=/usr/local --with-ensurepip=install >/dev/null
+    make -j"$(nproc)" >/dev/null
+    run_sudo make altinstall >/dev/null
+  )
+  rm -rf "${src}" "${src}.tgz"
+  PYTHON_BIN="/usr/local/bin/python${mm}"
+}
+
+if RESOLVED="$(find_python)"; then
+  PYTHON_BIN="${RESOLVED}"
+else
+  build_python
+  if ! py_ok "${PYTHON_BIN}"; then
+    echo "   [remote] ERROR: Python build finished but ${PYTHON_BIN} is unusable." >&2
+    exit 1
+  fi
 fi
-if ! "${PYTHON_BIN}" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)'; then
-  echo "   [remote] ERROR: ${PYTHON_BIN} is $(${PYTHON_BIN} -V 2>&1); need >=3.10." >&2
-  echo "   [remote] On Raspberry Pi OS Bullseye, install python3.11 and set PYTHON_BIN=python3.11." >&2
-  exit 1
-fi
-echo "   [remote] using $(${PYTHON_BIN} -V 2>&1)"
+echo "   [remote] using ${PYTHON_BIN} ($(${PYTHON_BIN} -V 2>&1))"
 
 # --- fetch / update source -------------------------------------------------
 if [ -d "${APP_DIR}/.git" ]; then

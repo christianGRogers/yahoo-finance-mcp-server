@@ -116,11 +116,17 @@ it on port 8081 with a health check. It authenticates over SSH using these
 | `DEPLOY_SSH_USER` | SSH username |
 | `DEPLOY_SSH_PASSWORD` | SSH password |
 
-Set `PYTHON_BIN` if the remote's default `python3` is older than 3.10 — e.g. on
-**Raspberry Pi OS Bullseye** (ships Python 3.9.2) install a newer interpreter
-and set `PYTHON_BIN=python3.11`. In CI, define a repository variable
-`PYTHON_BIN` (Settings → Secrets and variables → Actions → Variables). The
-deploy aborts early with a clear message if the interpreter is too old.
+**Python is auto-provisioned.** The script needs Python ≥ 3.10. It first scans
+the remote for any installed interpreter that qualifies (`python3.10`–`3.13`,
+including `/usr/local/bin`). If none is found — e.g. on **Raspberry Pi OS
+Bullseye**, which ships only Python 3.9.2 — it installs build deps and compiles
+CPython (default `3.11.9`, override with `PYTHON_BUILD_VERSION`) to
+`/usr/local` via `make altinstall`. This one-time bootstrap takes ~15–40 min on
+a Pi; subsequent deploys detect the installed interpreter and skip it.
+
+Building requires root: it works if the deploy user has passwordless sudo,
+otherwise it falls back to `sudo -S` using `DEPLOY_SSH_PASSWORD`. You can still
+set `PYTHON_BIN` to force a specific interpreter; it's used if it qualifies.
 
 The `.github/workflows/deploy.yml` workflow runs the script on every push to
 `main` (and on manual `workflow_dispatch`). To run it by hand:
