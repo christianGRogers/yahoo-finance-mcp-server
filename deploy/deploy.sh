@@ -149,8 +149,20 @@ fi
 cd "${APP_DIR}"
 
 # --- install ----------------------------------------------------------------
+# Recreate the venv if it is missing or was built with an old interpreter
+# (e.g. a 3.9 venv left by an earlier deploy). `venv` reuses an existing
+# directory without swapping the python symlinks, so we must clear it.
+echo "   [remote] preparing virtualenv"
+if [ -x .venv/bin/python ] && \
+   .venv/bin/python -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)' 2>/dev/null; then
+  echo "   [remote] reusing existing venv ($(.venv/bin/python -V 2>&1))"
+else
+  echo "   [remote] (re)creating venv with ${PYTHON_BIN}"
+  rm -rf .venv
+  "${PYTHON_BIN}" -m venv .venv
+fi
+
 echo "   [remote] installing dependencies"
-"${PYTHON_BIN}" -m venv .venv
 ./.venv/bin/python -m pip install --quiet --upgrade pip
 ./.venv/bin/python -m pip install --quiet -e .
 
