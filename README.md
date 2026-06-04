@@ -11,6 +11,44 @@ required.
 > you). It is the most complete free way to access Yahoo's data, but it is
 > unofficial — endpoints can change or rate-limit without notice.
 
+## Live deployment
+
+A hosted instance is **deployed and running** at:
+
+```
+https://janus.bradensbay.com/mcp
+```
+
+It speaks MCP over streamable HTTP. Add it to Claude Code with one command — no
+local install required:
+
+```bash
+claude mcp add --transport http --scope project yahoo-finance https://janus.bradensbay.com/mcp
+```
+
+`--scope project` writes the server to this project's `.mcp.json` so it's shared
+with anyone who checks out the repo. Drop the flag for a personal (per-user)
+entry, or use `--scope user` to make it available across all your projects.
+
+Verify the connection:
+
+```bash
+claude mcp list            # lists configured servers + reachability
+claude mcp get yahoo-finance
+```
+
+Quick health check of the endpoint itself (expects HTTP 200):
+
+```bash
+curl -i -X POST https://janus.bradensbay.com/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+> Prefer running your own instance (locally over stdio, or self-hosted over
+> HTTP)? See [Installation](#installation) and [Deployment](#deployment-http-port-8081) below.
+
 ## What the agent can see
 
 Every major data category Yahoo Finance serves is exposed as a tool:
