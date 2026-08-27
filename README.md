@@ -1,5 +1,8 @@
 # Yahoo Finance MCP Server
 
+
+I built this at purpose invest because fuck bloomberg but realized having claude call the yahoo python library was more efficient so this is kinda pointless 
+
 An [MCP](https://modelcontextprotocol.io) server that exposes the **full Yahoo
 Finance data surface** to AI agents, backed by the
 [`yfinance`](https://github.com/ranaroussi/yfinance) library. No API key
